@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermit Crab Shell Search Simulator</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      canvas {
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+      }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const PlayIcon = () => (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        );
+
+        const PauseIcon = () => (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+        );
+
+        const ResetIcon = () => (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="1 4 1 10 7 10"></polyline>
+            <polyline points="23 20 23 14 17 14"></polyline>
+            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
+          </svg>
+        );
+
+        const ShuffleIcon = () => (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="16 3 21 3 21 8"></polyline>
+            <line x1="4" y1="20" x2="21" y2="3"></line>
+            <polyline points="21 16 21 21 16 21"></polyline>
+            <line x1="15" y1="15" x2="21" y2="21"></line>
+            <line x1="4" y1="4" x2="9" y2="9"></line>
+          </svg>
+        );
+
+        const HermitCrabSimulation = () => {
+          const canvasRef = useRef(null);
+          const [isRunning, setIsRunning] = useState(false);
+          const [crabSize, setCrabSize] = useState(10);
+          const [numShells, setNumShells] = useState(15);
+          const [dispersion, setDispersion] = useState(50);
+          const [memory, setMemory] = useState(5);
+          const [elapsedTime, setElapsedTime] = useState(0);
+          const [isComplete, setIsComplete] = useState(false);
+          const [shellChanges, setShellChanges] = useState(0);
+          const [changeHistory, setChangeHistory] = useState([]);
+          const [totalRuns, setTotalRuns] = useState(0);
+          const [crabName, setCrabName] = useState('');
+          const [pathLength, setPathLength] = useState(0);
+          const simRef = useRef(null);
+          const startTimeRef = useRef(null);
+          const animationFrameRef = useRef(null);
+
+          useEffect(() => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            const width = canvas.width;
+            const height = canvas.height;
+
+            function generateShellSize(type, crabSize) {
+              if (type === 'optimal') {
+                return crabSize * (0.97 + Math.random() * 0.06);
+              } else if (type === 'too-large') {
+                return crabSize * (1.2 + Math.random() * 0.8);
+              } else {
+                return crabSize * (0.2 + Math.random() * 0.6);
+              }
+            }
+
+            function generateShells(count, dispersionValue, crabSize) {
+              const shells = [];
+              const minDistance = 15;
+              
+              // Create shell type array: EXACTLY 1 optimal + rest split between too-large and too-small
+              let shellTypes = ['optimal'];
+              const remaining = count - 1;
+              const tooLargeCount = Math.floor(remaining / 2);
+              const tooSmallCount = remaining - tooLargeCount;
+              
+              for (let i = 0; i < tooLargeCount; i++) shellTypes.push('too-large');
+              for (let i = 0; i < tooSmallCount; i++) shellTypes.push('too-small');
+              
+              // Shuffle
+              for (let i = shellTypes.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shellTypes[i], shellTypes[j]] = [shellTypes[j], shellTypes[i]];
+              }
+              
+              // Place shells with MUCH more persistence
+              let placementAttempts = 0;
+              const maxTotalAttempts = 5000;
+              
+              for (let i = 0; i < count && placementAttempts < maxTotalAttempts; i++) {
+                let placed = false;
+                let attempts = 0;
+                
+                while (!placed && attempts < 1000 && placementAttempts < maxTotalAttempts) {
+                  let x, y;
+                  
+                  if (dispersionValue < 33) {
+                    // Clumped
+                    const centerX = width / 2, centerY = height / 2, clusterRadius = 150;
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * clusterRadius;
+                    x = centerX + Math.cos(angle) * dist;
+                    y = centerY + Math.sin(angle) * dist;
+                  } else if (dispersionValue > 66) {
+                    // Dispersed
+                    x = 50 + Math.random() * (width - 100);
+                    y = 50 + Math.random() * (height - 100);
+                  } else {
+                    // Moderate clusters
+                    const clusterIndex = Math.floor(Math.random() * 3);
+                    const centerX = 150 + clusterIndex * 250;
+                    const centerY = 200 + (Math.random() - 0.5) * 200;
+                    const clusterRadius = 80;
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * clusterRadius;
+                    x = centerX + Math.cos(angle) * dist;
+                    y = centerY + Math.sin(angle) * dist;
+                  }
+                  
+                  const size = generateShellSize(shellTypes[i], crabSize);
+                  const shellScreenSize = (size * 0.625 + 1.25) * 3.78;
+                  
+                  if (x >= shellScreenSize + 10 && x <= width - shellScreenSize - 10 && 
+                      y >= shellScreenSize + 10 && y <= height - shellScreenSize - 10) {
+                    let overlaps = false;
+                    for (let shell of shells) {
+                      const dx = shell.x - x, dy = shell.y - y, dist = Math.sqrt(dx * dx + dy * dy);
+                      const otherScreenSize = (shell.size * 0.625 + 1.25) * 3.78;
+                      const requiredDist = shellScreenSize + otherScreenSize + minDistance;
+                      if (dist < requiredDist) { 
+                        overlaps = true; 
+                        break; 
+                      }
+                    }
+                    if (!overlaps) { 
+                      shells.push({ x, y, size, type: shellTypes[i], id: i, timesInvestigated: 0 }); 
+                      placed = true; 
+                    }
+                  }
+                  attempts++;
+                  placementAttempts++;
+                }
+                
+                // If we couldn't place it normally, force place it somewhere
+                if (!placed) {
+                  const size = generateShellSize(shellTypes[i], crabSize);
+                  const shellScreenSize = (size * 0.625 + 1.25) * 3.78;
+                  const x = shellScreenSize + 20 + Math.random() * (width - shellScreenSize * 2 - 40);
+                  const y = shellScreenSize + 20 + Math.random() * (height - shellScreenSize * 2 - 40);
+                  shells.push({ x, y, size, type: shellTypes[i], id: i, timesInvestigated: 0 });
+                }
+              }
+              
+              return shells;
+            }
+
+            function getShellColor(shell, crabSize) {
+              const fitDiff = Math.abs(shell.size - crabSize) / crabSize;
+              if (fitDiff <= 0.05) return '#22c55e';
+              else if (shell.size < crabSize) {
+                const intensity = Math.min(Math.abs(fitDiff) * 2, 1);
+                const r = 239, g = Math.floor(68 + (1 - intensity) * 150), b = Math.floor(68 + (1 - intensity) * 150);
+                return `rgb(${r}, ${g}, ${b})`;
+              } else {
+                const intensity = Math.min(Math.abs(fitDiff) * 2, 1);
+                const r = Math.floor(56 + (1 - intensity) * 150), g = Math.floor(189 + (1 - intensity) * 50), b = Math.floor(248 + (1 - intensity) * 7);
+                return `rgb(${r}, ${g}, ${b})`;
+              }
+            }
+
+            function getCurrentShellColor(currentShellSize, optimalSize) {
+              const fitDiff = Math.abs(currentShellSize - optimalSize) / optimalSize;
+              if (fitDiff <= 0.05) return '#22c55e';
+              else if (currentShellSize < optimalSize) {
+                const intensity = Math.min(Math.abs(fitDiff) * 2, 1);
+                const r = 239, g = Math.floor(68 + (1 - intensity) * 150), b = Math.floor(68 + (1 - intensity) * 150);
+                return `rgb(${r}, ${g}, ${b})`;
+              } else {
+                const intensity = Math.min(Math.abs(fitDiff) * 2, 1);
+                const r = Math.floor(56 + (1 - intensity) * 150), g = Math.floor(189 + (1 - intensity) * 50), b = Math.floor(248 + (1 - intensity) * 7);
+                return `rgb(${r}, ${g}, ${b})`;
+              }
+            }
+
+            function drawShell(ctx, shell, crabSize) {
+              const shellScreenSize = (shell.size * 0.625 + 1.25) * 3.78;
+              const chemicalStrength = shellScreenSize * 1.8;
+              
+              const gradient = ctx.createRadialGradient(shell.x, shell.y, 0, shell.x, shell.y, chemicalStrength);
+              gradient.addColorStop(0, 'rgba(147, 51, 234, 0.15)');
+              gradient.addColorStop(1, 'rgba(147, 51, 234, 0)');
+              ctx.fillStyle = gradient;
+              ctx.beginPath();
+              ctx.arc(shell.x, shell.y, chemicalStrength, 0, Math.PI * 2);
+              ctx.fill();
+
+              ctx.fillStyle = getShellColor(shell, crabSize);
+              ctx.beginPath();
+              ctx.arc(shell.x, shell.y, shellScreenSize * 0.6, 0, Math.PI * 2);
+              ctx.fill();
+              
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+              ctx.beginPath();
+              ctx.arc(shell.x + shellScreenSize * 0.2, shell.y, shellScreenSize * 0.3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+
+            function findCrabStartPosition(shells, crabScreenSize) {
+              const minDistanceFromShell = crabScreenSize * 5;
+              let bestPos = null;
+              let maxMinDist = 0;
+              
+              for (let attempt = 0; attempt < 200; attempt++) {
+                const x = crabScreenSize * 2 + Math.random() * (width - crabScreenSize * 4);
+                const y = crabScreenSize * 2 + Math.random() * (height - crabScreenSize * 4);
+                
+                let minDistToShell = Infinity;
+                for (let shell of shells) {
+                  const shellScreenSize = (shell.size * 0.625 + 1.25) * 3.78;
+                  const dx = shell.x - x, dy = shell.y - y;
+                  const dist = Math.sqrt(dx * dx + dy * dy) - shellScreenSize;
+                  minDistToShell = Math.min(minDistToShell, dist);
+                }
+                
+                if (minDistToShell > maxMinDist) {
+                  maxMinDist = minDistToShell;
+                  bestPos = { x, y };
+                }
+                
+                if (minDistToShell >= minDistanceFromShell) {
+                  return { x, y };
+                }
+              }
+              
+              return bestPos || { x: width / 2, y: height / 2 };
+            }
+
+            function init() {
+              const shells = generateShells(numShells, dispersion, crabSize);
+              const screenSize = (crabSize * 0.625 + 1.25) * 3.78;
+              
+              const startPos = findCrabStartPosition(shells, screenSize);
+              
+              // Randomness based on shell density (fewer shells = more random)
+              const shellDensity = numShells / 540000;
+              const baseRandomness = Math.max(0.3, 1 - (shellDensity * 100000));
+              
+              // Larger crabs move slower
+              const speed = 3.5 - (crabSize / 20) * 2;
+              
+              const crab = {
+                x: startPos.x, y: startPos.y, optimalSize: crabSize, screenSize: screenSize,
+                currentShellSize: crabSize * 0.8, angle: Math.random() * Math.PI * 2,
+                speed: speed, wanderAngle: 0, state: 'exploring',
+                currentTarget: null, lastInvestigated: null, assessmentTime: 0, assessmentDuration: 0,
+                investigatedShells: {}, shellChanges: 0, lastChangeType: null,
+                pathLength: 0, lastX: startPos.x, lastY: startPos.y, randomness: baseRandomness
+              };
+              return { shells, crab };
+            }
+
+            function detectChemicals(crab, shells, memoryLevel) {
+              let candidates = [];
+              
+              for (let shell of shells) {
+                const dx = shell.x - crab.x, dy = shell.y - crab.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                // Check if within 1 body length - MANDATORY investigation regardless of memory
+                if (dist <= crab.screenSize) {
+                  const timesVisited = crab.investigatedShells[shell.id] || 0;
+                  
+                  // If never visited, always investigate
+                  if (timesVisited === 0) {
+                    return { shell: shell, strength: 1000, distance: dist, mandatory: true };
+                  }
+                  
+                  // If visited before, check memory for reinvestigation
+                  // Memory 1 = 95% chance to reinvestigate, Memory 10 = 5% chance
+                  const reinvestigateChance = 0.95 - ((memoryLevel - 1) / 9) * 0.9;
+                  if (Math.random() < reinvestigateChance) {
+                    return { shell: shell, strength: 1000, distance: dist, mandatory: true };
+                  }
+                  // Skip this shell if memory says no
+                  continue;
+                }
+                
+                // For shells further away, use chemotaxis (larger shells = stronger attraction)
+                const chemicalStrength = shell.size; // Larger shells emit stronger signals
+                const perceivedStrength = chemicalStrength / (1 + (dist * dist) / 10000);
+                
+                // Check if already investigated
+                const timesVisited = crab.investigatedShells[shell.id] || 0;
+                
+                if (timesVisited === 0) {
+                  // Never investigated - full attraction
+                  candidates.push({ shell: shell, strength: perceivedStrength, distance: dist, mandatory: false });
+                } else {
+                  // Already investigated - apply memory filter
+                  const reinvestigateChance = 0.95 - ((memoryLevel - 1) / 9) * 0.9;
+                  if (Math.random() < reinvestigateChance) {
+                    candidates.push({ shell: shell, strength: perceivedStrength * 0.5, distance: dist, mandatory: false });
+                  }
+                }
+              }
+              
+              if (candidates.length === 0) return null;
+              
+              // Sort by strength (larger shells preferred)
+              candidates.sort((a, b) => b.strength - a.strength);
+              return candidates[0];
+            }
+
+            function calculateAssessmentTime(shellSize, optimalSize) {
+              const fitDiff = Math.abs(shellSize - optimalSize) / optimalSize;
+              if (fitDiff <= 0.1) return 600;
+              else if (fitDiff >= 0.5) return 300;
+              else {
+                const ratio = (fitDiff - 0.1) / (0.5 - 0.1);
+                const timeInSeconds = 10 - (5 * ratio);
+                return Math.floor(timeInSeconds * 60);
+              }
+            }
+
+            function shouldSwitch(currentSize, newSize, optimalSize) {
+              const currentFit = Math.abs(currentSize - optimalSize);
+              const newFit = Math.abs(newSize - optimalSize);
+              return newFit < currentFit;
+            }
+
+            function updateCrab(crab, shells) {
+              if (crab.state === 'exploring') {
+                const detected = detectChemicals(crab, shells, memory);
+                let chemotaxisBias = 0, targetAngle = crab.angle;
+                
+                if (detected) {
+                  const dx = detected.shell.x - crab.x, dy = detected.shell.y - crab.y;
+                  const dist = detected.distance;
+                  
+                  // If mandatory (within 1 body length) or very close, start assessing
+                  if (detected.mandatory || dist < 20) {
+                    crab.currentTarget = detected.shell;
+                    crab.state = 'assessing';
+                    crab.assessmentTime = 0;
+                    const visitCount = crab.investigatedShells[detected.shell.id] || 0;
+                    crab.investigatedShells[detected.shell.id] = visitCount + 1;
+                    let baseTime = calculateAssessmentTime(detected.shell.size, crab.optimalSize);
+                    if (detected.shell.timesInvestigated > 0) baseTime = Math.floor(baseTime * 0.5);
+                    crab.assessmentDuration = baseTime;
+                    detected.shell.timesInvestigated++;
+                    return 'running';
+                  } else {
+                    // Move toward shell via chemotaxis
+                    const normalizedStrength = Math.min(detected.strength / 50, 1);
+                    chemotaxisBias = normalizedStrength;
+                    targetAngle = Math.atan2(dy, dx);
+                  }
+                }
+                
+                if (chemotaxisBias > 0.01) {
+                  const angleDiff = targetAngle - crab.angle;
+                  const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+                  const turningRate = 0.05 + (chemotaxisBias * 0.25);
+                  crab.angle += normalizedDiff * turningRate;
+                  crab.wanderAngle += (Math.random() - 0.5) * 0.5 * crab.randomness;
+                  crab.wanderAngle = Math.max(-0.5, Math.min(0.5, crab.wanderAngle)) * crab.randomness;
+                  crab.angle += crab.wanderAngle * 0.1;
+                } else {
+                  crab.wanderAngle += (Math.random() - 0.5) * 0.6 * crab.randomness;
+                  crab.wanderAngle = Math.max(-1, Math.min(1, crab.wanderAngle));
+                  crab.angle += crab.wanderAngle * 0.2;
+                }
+                
+                const newX = crab.x + Math.cos(crab.angle) * crab.speed;
+                const newY = crab.y + Math.sin(crab.angle) * crab.speed;
+                const dx = newX - crab.lastX, dy = newY - crab.lastY;
+                crab.pathLength += Math.sqrt(dx * dx + dy * dy);
+                crab.lastX = crab.x; crab.lastY = crab.y;
+                
+                const margin = crab.screenSize;
+                if (newX < margin || newX > width - margin) { crab.angle = Math.PI - crab.angle; crab.wanderAngle = 0; }
+                if (newY < margin || newY > height - margin) { crab.angle = -crab.angle; crab.wanderAngle = 0; }
+                crab.x = Math.max(margin, Math.min(width - margin, newX));
+                crab.y = Math.max(margin, Math.min(height - margin, newY));
+                
+              } else if (crab.state === 'assessing') {
+                crab.assessmentTime++;
+                
+                if (crab.assessmentTime >= crab.assessmentDuration) {
+                  const oldSize = crab.currentShellSize;
+                  
+                  if (shouldSwitch(crab.currentShellSize, crab.currentTarget.size, crab.optimalSize)) {
+                    crab.currentShellSize = crab.currentTarget.size;
+                    crab.shellChanges++;
+                    const fitDiff = Math.abs(crab.currentShellSize - crab.optimalSize) / crab.optimalSize;
+                    let changeType;
+                    if (fitDiff <= 0.05) {
+                      changeType = 'optimal';
+                      crab.lastChangeType = 'optimal';
+                    } else if (crab.currentShellSize > oldSize) {
+                      changeType = 'larger';
+                      crab.lastChangeType = 'larger';
+                    } else {
+                      changeType = 'smaller';
+                      crab.lastChangeType = 'smaller';
+                    }
+                    setChangeHistory(prev => [...prev, changeType]);
+                    setShellChanges(crab.shellChanges);
+                  }
+                  
+                  const fitDiff = Math.abs(crab.currentShellSize - crab.optimalSize) / crab.optimalSize;
+                  if (fitDiff <= 0.05) {
+                    setPathLength(crab.pathLength);
+                    return 'complete';
+                  }
+                  
+                  crab.lastInvestigated = crab.currentTarget;
+                  const dx = crab.x - crab.currentTarget.x, dy = crab.y - crab.currentTarget.y;
+                  const awayDist = Math.sqrt(dx * dx + dy * dy);
+                  if (awayDist < 1) crab.angle = Math.random() * Math.PI * 2;
+                  else crab.angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * Math.PI / 3;
+                  
+                  crab.state = 'exploring';
+                  crab.currentTarget = null;
+                  crab.wanderAngle = 0;
+                  
+                  for (let i = 0; i < 10; i++) {
+                    crab.x += Math.cos(crab.angle) * crab.speed;
+                    crab.y += Math.sin(crab.angle) * crab.speed;
+                  }
+                  
+                  const margin = crab.screenSize;
+                  crab.x = Math.max(margin, Math.min(width - margin, crab.x));
+                  crab.y = Math.max(margin, Math.min(height - margin, crab.y));
+                }
+              }
+              return 'running';
+            }
+
+            function drawCrab(ctx, crab) {
+              const currentShellScreenSize = (crab.currentShellSize * 0.625 + 1.25) * 3.78;
+              const shellColor = getCurrentShellColor(crab.currentShellSize, crab.optimalSize);
+              ctx.fillStyle = shellColor;
+              ctx.beginPath();
+              ctx.arc(crab.x, crab.y, currentShellScreenSize * 0.5, 0, Math.PI * 2);
+              ctx.fill();
+              
+              if (crab.lastChangeType) {
+                let lineColor = crab.lastChangeType === 'optimal' ? '#22c55e' : crab.lastChangeType === 'larger' ? '#38bdf8' : '#ef4444';
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                const lineY = crab.y, lineStartX = crab.x - currentShellScreenSize * 0.4, lineEndX = crab.x + currentShellScreenSize * 0.4;
+                ctx.moveTo(lineStartX, lineY);
+                ctx.lineTo(lineEndX, lineY);
+                ctx.stroke();
+              }
+
+              ctx.fillStyle = '#f97316';
+              ctx.beginPath();
+              ctx.arc(crab.x, crab.y, crab.screenSize * 0.6, 0, Math.PI * 2);
+              ctx.fill();
+
+              const clawAngle1 = crab.angle - Math.PI / 4;
+              const clawAngle2 = crab.angle + Math.PI / 4;
+              ctx.strokeStyle = '#ea580c';
+              ctx.lineWidth = Math.max(2, crab.screenSize * 0.15);
+              ctx.beginPath();
+              ctx.moveTo(crab.x, crab.y);
+              ctx.lineTo(crab.x + Math.cos(clawAngle1) * crab.screenSize, crab.y + Math.sin(clawAngle1) * crab.screenSize);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.moveTo(crab.x, crab.y);
+              ctx.lineTo(crab.x + Math.cos(clawAngle2) * crab.screenSize, crab.y + Math.sin(clawAngle2) * crab.screenSize);
+              ctx.stroke();
+
+              ctx.fillStyle = '#000';
+              const eyeOffset = crab.screenSize * 0.4, eyeSize = Math.max(2, crab.screenSize * 0.1);
+              ctx.beginPath();
+              ctx.arc(crab.x + Math.cos(crab.angle - 0.3) * eyeOffset, crab.y + Math.sin(crab.angle - 0.3) * eyeOffset, eyeSize, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.beginPath();
+              ctx.arc(crab.x + Math.cos(crab.angle + 0.3) * eyeOffset, crab.y + Math.sin(crab.angle + 0.3) * eyeOffset, eyeSize, 0, Math.PI * 2);
+              ctx.fill();
+
+              if (crab.state === 'assessing') {
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(crab.x, crab.y, crab.screenSize * 1.3, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                const progress = crab.assessmentTime / crab.assessmentDuration;
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(crab.x, crab.y, crab.screenSize * 1.3, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+                ctx.stroke();
+              }
+            }
+
+            function animate() {
+              if (!isRunning) return;
+              
+              ctx.fillStyle = '#0f172a';
+              ctx.fillRect(0, 0, width, height);
+              
+              const { shells, crab } = simRef.current;
+              
+              if (startTimeRef.current) {
+                const elapsed = (Date.now() - startTimeRef.current) / 1000;
+                setElapsedTime(elapsed);
+              }
+              
+              const status = updateCrab(crab, shells);
+              if (status === 'complete') {
+                setIsRunning(false);
+                setIsComplete(true);
+              }
+              
+              shells.forEach(shell => drawShell(ctx, shell, crabSize));
+              drawCrab(ctx, crab);
+              
+              ctx.fillStyle = '#fff';
+              ctx.font = 'bold 20px monospace';
+              ctx.fillText(`Time: ${elapsedTime.toFixed(2)}s`, 10, 25);
+              ctx.font = '12px monospace';
+              ctx.fillText(`State: ${crab.state}`, 10, 45);
+              const currentFit = ((crab.currentShellSize - crab.optimalSize) / crab.optimalSize * 100).toFixed(1);
+              ctx.fillText(`Shell fit: ${currentFit}%`, 10, 60);
+              ctx.fillText(`Shell changes: ${crab.shellChanges}`, 10, 75);
+              ctx.fillText(`Shells: ${shells.length}/${numShells}`, 10, 90);
+              
+              const optimalCount = shells.filter(s => s.type === 'optimal').length;
+              ctx.fillText(`Optimal: ${optimalCount}`, 10, 105);
+              
+              ctx.fillStyle = '#22c55e';
+              ctx.fillRect(width - 140, 8, 15, 15);
+              ctx.fillStyle = '#fff';
+              ctx.fillText('Optimal', width - 120, 20);
+              ctx.fillStyle = '#38bdf8';
+              ctx.fillRect(width - 140, 28, 15, 15);
+              ctx.fillStyle = '#fff';
+              ctx.fillText('Too large', width - 120, 40);
+              ctx.fillStyle = '#ef4444';
+              ctx.fillRect(width - 140, 48, 15, 15);
+              ctx.fillStyle = '#fff';
+              ctx.fillText('Too small', width - 120, 60);
+              ctx.fillStyle = '#fff';
+              ctx.font = '12px monospace';
+              ctx.fillText('Shell changes:', width - 140, 85);
+              
+              let tallyX = width - 140, tallyY = 100;
+              changeHistory.forEach((changeType, index) => {
+                ctx.strokeStyle = changeType === 'optimal' ? '#22c55e' : changeType === 'larger' ? '#38bdf8' : '#ef4444';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(tallyX + (index % 10) * 8, tallyY);
+                ctx.lineTo(tallyX + (index % 10) * 8, tallyY + 10);
+                ctx.stroke();
+                if ((index + 1) % 10 === 0) tallyY += 15;
+              });
+              
+              if (isComplete) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, width, height);
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 40px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('OPTIMAL SHELL FOUND!', width / 2, height / 2);
+                ctx.font = 'bold 28px monospace';
+                ctx.fillText(`Time: ${elapsedTime.toFixed(2)}s`, width / 2, height / 2 + 45);
+              }
+              
+              animationFrameRef.current = requestAnimationFrame(animate);
+            }
+
+            if (!simRef.current) simRef.current = init();
+
+            if (isRunning) {
+              if (!startTimeRef.current) startTimeRef.current = Date.now();
+              animate();
+            }
+
+            return () => { if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current); };
+          }, [isRunning, crabSize, numShells, dispersion, memory, elapsedTime, isComplete, changeHistory]);
+
+          const handleStart = () => {
+            if (!simRef.current) handleReset();
+            startTimeRef.current = Date.now();
+            setElapsedTime(0);
+            setIsComplete(false);
+            setIsRunning(true);
+            setTotalRuns(prev => prev + 1);
+          };
+
+          const handleReset = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            simRef.current = null;
+            startTimeRef.current = null;
+            setElapsedTime(0);
+            setIsComplete(false);
+            setShellChanges(0);
+            setChangeHistory([]);
+            setPathLength(0);
+            setIsRunning(false);
+          };
+
+          const handleRandomize = () => {
+            setCrabSize(Math.floor(Math.random() * 20) + 1);
+            setNumShells(Math.floor(Math.random() * 26) + 5);
+            setDispersion(Math.floor(Math.random() * 101));
+            setMemory(Math.floor(Math.random() * 10) + 1);
+            setTimeout(handleReset, 100);
+          };
+
+          const handleSaveData = () => {
+            if (!crabName.trim()) { alert('Please enter a crab name before saving!'); return; }
+            const now = new Date();
+            const csvContent = `Crab Name,Date,Time,Duration (s),Shell Changes,Path Length,Crab Size,Number of Shells,Dispersion,Memory\n${crabName},${now.toLocaleDateString('en-US')},${now.toLocaleTimeString('en-US')},${elapsedTime.toFixed(2)},${shellChanges},${pathLength.toFixed(2)},${crabSize},${numShells},${dispersion},${memory}`;
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `hermit_crab_${crabName.replace(/\s+/g, '_')}_${Date.now()}.csv`;
+            link.click();
+          };
+
+          return (
+            <div className="w-full min-h-screen bg-slate-900 flex items-center justify-center p-4">
+              <div className="bg-slate-800 rounded-lg shadow-2xl p-6 max-w-5xl w-full">
+                <h1 className="text-2xl font-bold text-white mb-4">Hermit Crab Shell Search Simulator</h1>
+                <canvas ref={canvasRef} width={900} height={600} className="w-full border-2 border-slate-700 rounded mb-4" style={{maxWidth: '900px', height: 'auto'}} />
+                <div className="space-y-4">
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={handleStart} disabled={isRunning} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded transition-colors">
+                      <PlayIcon /> Start
+                    </button>
+                    <button onClick={() => setIsRunning(false)} disabled={!isRunning} className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white rounded transition-colors">
+                      <PauseIcon /> Pause
+                    </button>
+                    <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors">
+                      <ResetIcon /> Reset
+                    </button>
+                    <button onClick={handleRandomize} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors">
+                      <ShuffleIcon /> Randomize
+                    </button>
+                  </div>
+                  <div className="bg-slate-700 p-3 rounded">
+                    <label className="text-white text-sm mb-2 block">Name Your Crab:</label>
+                    <div className="flex gap-2">
+                      <input type="text" value={crabName} onChange={(e) => setCrabName(e.target.value)} placeholder="Enter crab name" className="flex-1 px-3 py-2 bg-slate-600 text-white rounded border border-slate-500" />
+                      <button onClick={handleSaveData} disabled={!isComplete} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 text-white rounded transition-colors">Save Data</button>
+                    </div>
+                  </div>
+                  <div className="text-white text-sm bg-slate-700 p-2 rounded"><p>Total Simulations Run: {totalRuns}</p></div>
+                  <div className="space-y-3">
+                    <div><label className="text-white text-sm mb-1 block">Crab Size: {crabSize} ({(crabSize * 0.625 + 1.25).toFixed(1)}mm)</label><input type="range" min="1" max="20" step="1" value={crabSize} onChange={(e) => { setCrabSize(parseFloat(e.target.value)); handleReset(); }} className="w-full" /></div>
+                    <div><label className="text-white text-sm mb-1 block">Number of Shells: {numShells}</label><input type="range" min="5" max="30" step="1" value={numShells} onChange={(e) => { setNumShells(parseInt(e.target.value)); handleReset(); }} className="w-full" /></div>
+                    <div><label className="text-white text-sm mb-1 block">Dispersion: {dispersion < 33 ? 'Clumped' : dispersion < 67 ? 'Moderate (random clusters)' : 'Dispersed'}</label><input type="range" min="0" max="100" step="1" value={dispersion} onChange={(e) => { setDispersion(parseInt(e.target.value)); handleReset(); }} className="w-full" /></div>
+                    <div><label className="text-white text-sm mb-1 block">Memory: {memory} (reinvestigate: {(95 - ((memory - 1) / 9) * 90).toFixed(0)}%)</label><input type="range" min="1" max="10" step="1" value={memory} onChange={(e) => setMemory(parseInt(e.target.value))} className="w-full" /></div>
+                  </div>
+                </div>
+                <div className="mt-4 text-sm text-slate-300 space-y-1">
+                  <p>• Crab starts ≥5 body lengths from nearest shell, with shell 80% of optimal size</p>
+                  <p>• Shell distribution: exactly 1 optimal (green), rest split between too-large (blue) and too-small (red)</p>
+                  <p>• Chemotaxis: larger shells emit stronger signals and attract crabs first</p>
+                  <p>• Investigation: NEW shells always investigated; VISITED shells reinvestigated based on memory</p>
+                  <p>• Memory: affects reinvestigation likelihood when shell approached (95% at mem=1, 5% at mem=10)</p>
+                  <p>• Mandatory investigation: within 1 body length, crab MUST investigate</p>
+                  <p>• Speed: larger crabs move slower than smaller crabs</p>
+                  <p>• Randomness: fewer shells = more random searching</p>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<HermitCrabSimulation />);
+    </script>
+</body>
+</html>
